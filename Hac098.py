@@ -3,13 +3,13 @@ from collections import Counter, defaultdict
 from typing import List, Dict, Any, Optional
 import math
 
-# Parâmetros de janela: foco total entre últimos 10 e 27 resultados
+# Parâmetros para filtro da janela de análise (foco nos últimos 10 a 27 eventos)
 WINDOW_MIN = 10
 WINDOW_MAX = 27
 
 class MarkovModel:
-    """Cadeia de Markov de ordem até 2 para previsão condicional."""
-    def __init__(self, order=2):
+    """Cadeia de Markov de ordem variável (até 3) para previsão condicional."""
+    def __init__(self, order=3):
         self.order = order
         self.transitions: Dict[Any, Counter] = defaultdict(Counter)
 
@@ -34,10 +34,8 @@ class CasinoAnalyzer:
         self.results = results
 
     def _extract_window(self) -> List[str]:
-        if len(self.results) >= WINDOW_MAX:
-            window = self.results[-WINDOW_MAX:]
-        else:
-            window = self.results[:]
+        # Prioriza análise nos últimos 10 a 27 resultados
+        window = self.results[-WINDOW_MAX:] if len(self.results) >= WINDOW_MAX else self.results[:]
         if len(window) < WINDOW_MIN:
             return []
         return window[-WINDOW_MIN:]
@@ -47,7 +45,8 @@ class CasinoAnalyzer:
         window = self._extract_window()
         if not window:
             return patterns
-        # Micro-padrão 2x2
+
+        # Micro-padrão 2x2 repetitivo
         if len(window) >= 6:
             last6 = window[-6:]
             double_count = sum(1 for i in range(0, 6, 2)
@@ -59,37 +58,62 @@ class CasinoAnalyzer:
                     'desc': f'Padrão 2x2 repetitivo ({double_count}/3 em {last6})',
                     'risk': risk_level
                 })
+
         # Alta alternância
         if len(window) >= 8:
             alt_count = sum(1 for i in range(1, 8)
                             if window[-i] != window[-i-1] and window[-i] != 'E' and window[-i-1] != 'E')
             if alt_count >= 4:
                 risk_level = 'crítico' if alt_count == 7 else 'alto'
-                patterns.append({'type': 'micro_alternation', 'desc': f'Alternância alta ({alt_count}/7)', 'risk': risk_level})
-        # Compensação
+                patterns.append({
+                    'type': 'micro_alternation',
+                    'desc': f'Alternância alta ({alt_count}/7)',
+                    'risk': risk_level
+                })
+
+        # Compensação (balanceamento / pendência)
         c = window.count('C')
         v = window.count('V')
         diff = abs(c - v)
         if len(window) >= WINDOW_MIN:
             if diff <= 1:
-                patterns.append({'type': 'artificial_balance', 'desc': f'Equilíbrio estatístico ({c}C x {v}V)', 'risk': 'suspeito'})
+                patterns.append({
+                    'type': 'artificial_balance',
+                    'desc': f'Equilíbrio estatístico ({c}C x {v}V)',
+                    'risk': 'suspeito'
+                })
             if diff >= int(0.45 * len(window)):
                 favored = 'C' if c < v else 'V'
-                patterns.append({'type': 'compensation_pending', 'desc': f'Compensação pendente na cor {favored}', 'risk': 'alto'})
-        # Entropia baixa
+                patterns.append({
+                    'type': 'compensation_pending',
+                    'desc': f'Compensação pendente na cor {favored}',
+                    'risk': 'alto'
+                })
+
+        # Entropia baixa (baixa aleatoriedade)
         ent = self.shannon_entropy([x for x in window if x in ['C','V']])
         if ent < 0.7:
-            patterns.append({'type': 'low_entropy', 'desc': f'Entropia baixa: {ent:.2f}', 'risk': 'crítico'})
+            patterns.append({
+                'type': 'low_entropy',
+                'desc': f'Entropia baixa: {ent:.2f}',
+                'risk': 'crítico'
+            })
+
         # Ciclos e quase-ciclos
         for size in [3, 4, 5]:
             if len(window) < 2 * size:
                 continue
             segments = [''.join(window[i:i+size]) for i in range(len(window)-size+1)]
-            count_segments = Counter(segments)
-            most_common, count = count_segments.most_common(1)[0]
+            counter_segs = Counter(segments)
+            most_common, count = counter_segs.most_common(1)[0]
             if count >= 2:
                 risk_level = 'alto' if count == 2 else 'crítico'
-                patterns.append({'type': 'hidden_cycle', 'desc': f'Ciclo quase-repetido: "{most_common}" ({count}x)', 'risk': risk_level})
+                patterns.append({
+                    'type': 'hidden_cycle',
+                    'desc': f'Ciclo quase-repetido: "{most_common}" ({count}x)',
+                    'risk': risk_level
+                })
+
         return patterns
 
     def shannon_entropy(self, seq: List[str]) -> float:
@@ -108,11 +132,12 @@ class CasinoAnalyzer:
             return "alto"
         elif score >= 1:
             return "moderado"
-        return "baixo"
+        else:
+            return "baixo"
 
-    def build_markov_model(self, order=2) -> Optional[MarkovModel]:
+    def build_markov_model(self, order=3) -> Optional[MarkovModel]:
         eventos = [r for r in self.results if r in ['C', 'V']]
-        if len(eventos) < order+1:
+        if len(eventos) < order + 1:
             return None
         mm = MarkovModel(order=order)
         mm.train(eventos)
@@ -123,7 +148,17 @@ class CasinoAnalyzer:
         eventos = [r for r in window if r in ['C', 'V']]
         if len(eventos) < max(WINDOW_MIN, 6):
             return {'color': None, 'conf': 0, 'support': 'Histórico insuficiente.'}
-        # Modelo ordem 2 preferencial
+
+        # Tenta ordem 3 primeiro
+        mk3 = self.build_markov_model(order=3)
+        if mk3 and len(eventos) >= 3:
+            probs = mk3.predict_next_prob(eventos[-3:])
+            if probs:
+                cor, prob = max(probs.items(), key=lambda t: t[1])
+                if prob >= 0.60:
+                    return {'color': cor, 'conf': prob*100, 'support': f'Cadeia Markov(3): {probs}'}
+
+        # fallback ordem 2
         mk2 = self.build_markov_model(order=2)
         if mk2 and len(eventos) >= 2:
             probs = mk2.predict_next_prob(eventos[-2:])
@@ -131,7 +166,8 @@ class CasinoAnalyzer:
                 cor, prob = max(probs.items(), key=lambda t: t[1])
                 if prob >= 0.60:
                     return {'color': cor, 'conf': prob*100, 'support': f'Cadeia Markov(2): {probs}'}
-        # Fallback ordem 1
+
+        # fallback ordem 1
         mk1 = self.build_markov_model(order=1)
         if mk1 and len(eventos) >= 1:
             probs = mk1.predict_next_prob(eventos[-1:])
@@ -139,10 +175,12 @@ class CasinoAnalyzer:
                 cor, prob = max(probs.items(), key=lambda t: t[1])
                 if prob >= 0.60:
                     return {'color': cor, 'conf': prob*100, 'support': f'Cadeia Markov(1): {probs}'}
-        # Fallback frequência simples
+
+        # fallback frequência simples
         freq = Counter(eventos)
         cor, q = freq.most_common(1)[0]
         return {'color': cor, 'conf': (q/len(eventos))*100, 'support': 'Maior frequência na janela.'}
+
 
 def main():
     st.title("CasinoAnalyzer PRO - Análise Avançada de Manipulação e Predição")
@@ -154,6 +192,7 @@ def main():
     if 'accuracy_log' not in st.session_state:
         st.session_state.accuracy_log = []
 
+    # Botões para entrada de resultados
     col1, col2, col3 = st.columns(3)
     if col1.button("🔴 (Casa - Vermelho)"):
         st.session_state.history.append('V')
@@ -179,18 +218,19 @@ def main():
         st.info("Use os botões acima para inserir os resultados do jogo e iniciar a análise.")
         return
 
-    # Exibição do histórico
+    # Mostra histórico visual
     st.subheader("Histórico atual (mais recente à esquerda):")
     color_map = {'V': '🔴', 'C': '🔵', 'E': '🟡'}
     hist_disp = ''.join(color_map.get(r, '⬜') for r in reversed(st.session_state.history))
     st.markdown(f"**{hist_disp}**")
 
+    # Executa análise
     analyzer = CasinoAnalyzer(st.session_state.history)
     patterns = analyzer.analyze_patterns()
     risk = analyzer.risk_and_signal(patterns)
     markov_pred = analyzer.markov_predict()
 
-    # Conferência das predições com resultados reais
+    # Conferência automática da predição x resultado real
     eventos = [r for r in st.session_state.history if r in ['C', 'V']]
     idx_pred = len(st.session_state.predictions_log)
     if len(eventos) >= 2 and len(st.session_state.predictions_log) > 0:
@@ -201,12 +241,13 @@ def main():
             real_result = eventos[real_idx]
             if prev_pred.get('color') is not None:
                 if len(st.session_state.accuracy_log) < len(st.session_state.predictions_log):
-                    st.session_state.accuracy_log.append(prev_pred.get('color') == real_result)
+                    acertou = prev_pred.get('color') == real_result
+                    st.session_state.accuracy_log.append(acertou)
 
     if len(st.session_state.predictions_log) < len(eventos):
         st.session_state.predictions_log.append(markov_pred)
 
-    # Exibir avaliação de risco
+    # Exibir avaliação risco
     st.markdown("## Avaliação de Risco 🚦")
     st.markdown(f"- Nível de risco da janela {WINDOW_MIN}-{WINDOW_MAX}: **{risk}**")
     with st.expander("Padrões detectados e níveis de risco"):
@@ -216,26 +257,32 @@ def main():
         else:
             st.write("Nenhum padrão relevante detectado na janela atual.")
 
-    # Predição e BOTÃO interativo para entrada
+    # Exibir predição e botão de aposta interativo
     st.header("Predição do Próximo Resultado")
     if risk == "crítico":
-        st.error("🚨 Manipulação crítica detectada! Sistema em pausa para proteção.\n"
-                 "Aguarde a alimentação de mais dados para retomada automática das análises e sinais.")
+        st.error(
+            "🚨 Manipulação crítica detectada! Sistema em pausa para proteção.\n"
+            "Aguarde a alimentação de mais dados para retomada automática das análises e sinais."
+        )
     else:
         color = markov_pred.get('color')
         conf = markov_pred.get('conf', 0)
         support = markov_pred.get('support', '')
-        if color:
-            emoji = {'V': '🔴', 'C': '🔵'}.get(color, color)
+        emoji_map = {'V': '🔴', 'C': '🔵'}
+        emoji = emoji_map.get(color, None)
+
+        if emoji and conf >= 50:  # Ajuste o limiar conforme preferir
             st.success(f"**Sinal sugerido:** {emoji}  (Confiança: {conf:.1f}%)")
             st.write(f"Base analítica: {support}")
-            # Botão explícito para entrada
+
+            # Botão para confirmar a entrada
             if st.button(f"Apostar {emoji}"):
                 st.write(f"✅ Entrada registrada para a cor {emoji}. Boa sorte!")
+                # Aqui pode-se acrescentar lógica para registrar a aposta no sistema
         else:
-            st.info("Ainda sem confiança suficiente para sugerir sinal no momento.")
+            st.info("Sem sinal confiável suficiente para sugerir aposta no momento.")
 
-    # Painel de performance
+    # Painel de performance da conferência automática
     st.markdown("---")
     st.markdown("## Performance do Sistema (conferência automática)")
     if st.session_state.accuracy_log:
