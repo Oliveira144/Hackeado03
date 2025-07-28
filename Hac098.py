@@ -416,6 +416,12 @@ def main():
     if 'history' not in st.session_state:
         st.session_state.history = []
 
+    if 'predictions_log' not in st.session_state:
+        st.session_state.predictions_log = []  # lista de predições feitas
+
+    if 'accuracy_log' not in st.session_state:
+        st.session_state.accuracy_log = []  # lista booleana de acertos/erros
+
     col1, col2, col3 = st.columns(3)
 
     if col1.button("🔴"):
@@ -428,9 +434,16 @@ def main():
     col_clear, col_undo = st.columns(2)
     if col_clear.button("Limpar Histórico"):
         st.session_state.history = []
+        st.session_state.predictions_log = []
+        st.session_state.accuracy_log = []
     if col_undo.button("Apagar Último Resultado"):
         if st.session_state.history:
             st.session_state.history.pop()
+            # Remova também últimas predições/acertos para manter sincronizado
+            if st.session_state.predictions_log:
+                st.session_state.predictions_log.pop()
+            if st.session_state.accuracy_log:
+                st.session_state.accuracy_log.pop()
 
     if st.session_state.history:
         st.write("### Histórico Atual (Mais recente à esquerda):")
@@ -444,22 +457,37 @@ def main():
 
     analyzer = CasinoAnalyzer(st.session_state.history)
 
-    with st.spinner('Analisando dados...'):
-        micro_patterns = analyzer.analyze_micro_patterns()
-        hidden_cycles = analyzer.detect_hidden_cycles()
-        near_cycles = analyzer.detect_near_cycles()
-        entropy_patterns = analyzer.analyze_entropy()
-        regime_patterns = analyzer.detect_regime_change()
-        compensation_patterns = analyzer.analyze_compensation_patterns()
-        strategic_ties = analyzer.analyze_strategic_ties()
+    # Executa análise e predição
+    micro_patterns = analyzer.analyze_micro_patterns()
+    hidden_cycles = analyzer.detect_hidden_cycles()
+    near_cycles = analyzer.detect_near_cycles()
+    entropy_patterns = analyzer.analyze_entropy()
+    regime_patterns = analyzer.detect_regime_change()
+    compensation_patterns = analyzer.analyze_compensation_patterns()
+    strategic_ties = analyzer.analyze_strategic_ties()
 
-        patterns = (micro_patterns + hidden_cycles + near_cycles +
-                    entropy_patterns + regime_patterns +
-                    compensation_patterns + strategic_ties)
+    patterns = (micro_patterns + hidden_cycles + near_cycles +
+                entropy_patterns + regime_patterns +
+                compensation_patterns + strategic_ties)
 
-        risk = analyzer.assess_risk(patterns)
-        manipulation = analyzer.detect_manipulation(patterns, risk)
-        prediction = analyzer.make_prediction(patterns, risk, manipulation)
+    risk = analyzer.assess_risk(patterns)
+    manipulation = analyzer.detect_manipulation(patterns, risk)
+    prediction = analyzer.make_prediction(patterns, risk, manipulation)
+
+    # Conferir automaticamente se a predição anterior acertou
+    non_empate = [r for r in st.session_state.history if r != 'E']
+    idx_to_check = len(st.session_state.predictions_log)
+    # Se existe resultado novo para comparar com predição anterior
+    if len(non_empate) > idx_to_check:
+        if idx_to_check > 0:
+            prev_pred = st.session_state.predictions_log[-1]
+            real_result = non_empate[idx_to_check - 1]  # resultado do próximo esperado naquela predição
+            acertou = prev_pred.get('color') == real_result if prev_pred.get('color') else False
+            st.session_state.accuracy_log.append(acertou)
+        # Registra nova predição para o próximo evento
+        st.session_state.predictions_log.append(prediction)
+
+    # Apresenta resultados na interface
 
     st.markdown(f"## Avaliação Geral 🚦")
     st.markdown(f"- **Risco:** {risk['level'].upper()}  |  **Manipulação:** {manipulation['level'].upper()}")
@@ -494,6 +522,25 @@ def main():
         st.write(f"*Estratégia: {prediction['strategy']}*")
     else:
         st.write(prediction['reasoning'])
+
+    # Painel de performance automático
+    st.markdown("---")
+    st.markdown("## Performance do Sistema de Predição")
+    if st.session_state.accuracy_log:
+        total = len(st.session_state.accuracy_log)
+        acertos = sum(st.session_state.accuracy_log)
+        precisao = (acertos / total) * 100
+        st.markdown(f"- Total de predições avaliadas: {total}")
+        st.markdown(f"- Total de acertos: {acertos}")
+        st.markdown(f"- Taxa de acerto: **{precisao:.2f}%**")
+
+        with st.expander("Histórico de Acertos/Erros (últimas 20 predições)"):
+            ultimos = st.session_state.accuracy_log[-20:]
+            start_idx = total - len(ultimos) + 1
+            for i, acerto in enumerate(ultimos, start=start_idx):
+                st.write(f"Predição #{i}: {'✅ Acertou' if acerto else '❌ Errou'}")
+    else:
+        st.write("Sem dados suficientes para avaliar a performance ainda.")
 
 
 if __name__ == "__main__":
