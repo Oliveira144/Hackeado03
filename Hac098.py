@@ -3,12 +3,12 @@ from collections import Counter, defaultdict
 from typing import List, Dict, Any, Optional
 import math
 
-# Parâmetros para foco na análise
+# Parâmetros de janela: foco total entre últimos 10 e 27 resultados
 WINDOW_MIN = 10
 WINDOW_MAX = 27
 
 class MarkovModel:
-    """Cadeia de Markov de até ordem 2 para previsão condicional."""
+    """Cadeia de Markov de ordem até 2 para previsão condicional."""
     def __init__(self, order=2):
         self.order = order
         self.transitions: Dict[Any, Counter] = defaultdict(Counter)
@@ -47,7 +47,7 @@ class CasinoAnalyzer:
         window = self._extract_window()
         if not window:
             return patterns
-        # Micro-padrões 2x2
+        # Micro-padrão 2x2
         if len(window) >= 6:
             last6 = window[-6:]
             double_count = sum(1 for i in range(0, 6, 2)
@@ -179,7 +179,7 @@ def main():
         st.info("Use os botões acima para inserir os resultados do jogo e iniciar a análise.")
         return
 
-    # Histórico visual
+    # Exibição do histórico
     st.subheader("Histórico atual (mais recente à esquerda):")
     color_map = {'V': '🔴', 'C': '🔵', 'E': '🟡'}
     hist_disp = ''.join(color_map.get(r, '⬜') for r in reversed(st.session_state.history))
@@ -202,33 +202,38 @@ def main():
             if prev_pred.get('color') is not None:
                 if len(st.session_state.accuracy_log) < len(st.session_state.predictions_log):
                     st.session_state.accuracy_log.append(prev_pred.get('color') == real_result)
+
     if len(st.session_state.predictions_log) < len(eventos):
         st.session_state.predictions_log.append(markov_pred)
 
-    # Interface principal
+    # Exibir avaliação de risco
     st.markdown("## Avaliação de Risco 🚦")
     st.markdown(f"- Nível de risco da janela {WINDOW_MIN}-{WINDOW_MAX}: **{risk}**")
-    with st.expander("Padrões detectados e seus níveis de risco"):
+    with st.expander("Padrões detectados e níveis de risco"):
         if patterns:
             for p in patterns:
                 st.write(f"- [{p['risk'].upper()}] {p['desc']}")
         else:
             st.write("Nenhum padrão relevante detectado na janela atual.")
 
-    st.header("Predição de Próximo Resultado")
+    # Predição e BOTÃO interativo para entrada
+    st.header("Predição do Próximo Resultado")
     if risk == "crítico":
-        st.error("🚨 Manipulação crítica detectada! Sistema em pausa para proteção. Aguarde alimentação de novos dados para retomar as análises.")
-        st.write("Ao alimentar com mais resultados, o sistema reavaliará automaticamente e retornará a emitir sinais em condições normais.")
+        st.error("🚨 Manipulação crítica detectada! Sistema em pausa para proteção.\n"
+                 "Aguarde a alimentação de mais dados para retomada automática das análises e sinais.")
     else:
         color = markov_pred.get('color')
         conf = markov_pred.get('conf', 0)
         support = markov_pred.get('support', '')
         if color:
             emoji = {'V': '🔴', 'C': '🔵'}.get(color, color)
-            st.success(f"Sinal sugerido: {emoji} (Confiança: {conf:.1f}%)")
+            st.success(f"**Sinal sugerido:** {emoji}  (Confiança: {conf:.1f}%)")
             st.write(f"Base analítica: {support}")
+            # Botão explícito para entrada
+            if st.button(f"Apostar {emoji}"):
+                st.write(f"✅ Entrada registrada para a cor {emoji}. Boa sorte!")
         else:
-            st.info("Sem confiança suficiente para sugerir sinal no momento.")
+            st.info("Ainda sem confiança suficiente para sugerir sinal no momento.")
 
     # Painel de performance
     st.markdown("---")
@@ -250,4 +255,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
