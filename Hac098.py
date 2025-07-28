@@ -29,10 +29,6 @@ class CasinoAnalyzer:
         self.results = history
 
     def analyze_micro_patterns(self) -> List[Dict[str, Any]]:
-        """
-        Analisa os últimos resultados para detectar padrões micro de repetição dupla (2x2)
-        e alternâncias artificiais que indicam manipulação.
-        """
         patterns = []
         if len(self.results) < 6:
             return patterns
@@ -140,7 +136,6 @@ class CasinoAnalyzer:
         return patterns
 
     def analyze_strategic_ties(self) -> List[Dict[str, Any]]:
-        # Placeholder, pode ser customizado para empates
         return []
 
     def shannon_entropy(self, data: List[str]) -> float:
@@ -300,10 +295,6 @@ class CasinoAnalyzer:
         return mm
 
     def evaluate_markov_prediction(self, mm: MarkovModel) -> Dict[str, Any]:
-        """
-        Avalia a probabilidade do próximo evento segundo a cadeia de Markov.
-        Retorna padrão de risco e sugestão baseado na probabilidade.
-        """
         non_empate = [r for r in self.results if r != 'E']
         if not non_empate or mm is None:
             return {}
@@ -313,11 +304,9 @@ class CasinoAnalyzer:
         if not probs:
             return {}
 
-        # Encontra cor com maior probabilidade
         most_prob_color = max(probs, key=probs.get)
         max_prob = probs[most_prob_color]
 
-        # Define risco por baixa probabilidade máxima (baixa certeza)
         if max_prob < 0.4:
             risk = 'high'
             description = f'Modelo Markov: próxima jogada incerta, probabilidade máxima {max_prob:.2f}'
@@ -334,12 +323,8 @@ class CasinoAnalyzer:
         }
 
     def make_prediction(self, patterns: List[Dict[str, Any]], risk: Dict[str, Any], manipulation: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Combina heurística e modelo Markov para predição final, equilibrando confiança e riscos.
-        """
         prediction = {'color': None, 'confidence': 0, 'reasoning': '', 'strategy': 'AGUARDAR MELHORES CONDIÇÕES'}
 
-        # Parada imediata se risco critico/manipulação critica
         if risk['level'] == 'critical' or manipulation['level'] == 'critical':
             prediction.update({
                 'reasoning': '🚨 CONDIÇÕES CRÍTICAS - Manipulação máxima detectada',
@@ -347,7 +332,6 @@ class CasinoAnalyzer:
             })
             return prediction
 
-        # Evitar apostas em alto nível de manipulação
         if manipulation['level'] == 'high':
             prediction.update({
                 'reasoning': '⛔ Manipulação alta - Evitar apostas',
@@ -355,15 +339,12 @@ class CasinoAnalyzer:
             })
             return prediction
 
-        # Usa Markov para previsão probabilística adicional
         mm = self.build_markov_model()
         markov_pred = self.evaluate_markov_prediction(mm) if mm else {}
 
-        # Ajusta decisão com base nas análises heurísticas + markov
         compensation_pattern = next((p for p in patterns if p['type'] == 'compensation_pending'), None)
         cycle_pattern = next((p for p in patterns if p['type'] == 'hidden_cycle' and p.get('repetitions', 0) >= 2), None)
 
-        # Caso de compensação e baixo risco
         if compensation_pattern and risk['level'] == 'low' and manipulation['level'] == 'low':
             color = compensation_pattern['favored_color']
             confidence = min(75, 55 + (compensation_pattern['strength'] * 20))
@@ -375,7 +356,6 @@ class CasinoAnalyzer:
             })
             return prediction
 
-        # Seguir ciclo se conferido e risco baixo
         if cycle_pattern and risk['level'] == 'low' and manipulation['level'] == 'low':
             next_color = self.predict_next_in_cycle(cycle_pattern['pattern'])
             if next_color:
@@ -387,7 +367,6 @@ class CasinoAnalyzer:
                 })
                 return prediction
 
-        # Se Markov tem alta probabilidade para um próximo evento
         if markov_pred:
             prob = markov_pred['probability']
             color = markov_pred['predicted_color']
@@ -403,7 +382,6 @@ class CasinoAnalyzer:
                 })
                 return prediction
 
-        # Fallback para aposta na cor mais frequente no histórico se nada acima
         non_empate = [r for r in self.results if r != 'E']
         if not non_empate:
             return prediction
@@ -440,7 +418,6 @@ def main():
 
     col1, col2, col3 = st.columns(3)
 
-    # Botões com emojis para inserir resultados
     if col1.button("🔴"):
         st.session_state.history.append('V')  # Casa = vermelho
     if col2.button("🔵"):
@@ -465,4 +442,59 @@ def main():
         st.info("Use os botões acima para inserir resultados e iniciar análise.")
         return
 
-    analyzer = 
+    analyzer = CasinoAnalyzer(st.session_state.history)
+
+    with st.spinner('Analisando dados...'):
+        micro_patterns = analyzer.analyze_micro_patterns()
+        hidden_cycles = analyzer.detect_hidden_cycles()
+        near_cycles = analyzer.detect_near_cycles()
+        entropy_patterns = analyzer.analyze_entropy()
+        regime_patterns = analyzer.detect_regime_change()
+        compensation_patterns = analyzer.analyze_compensation_patterns()
+        strategic_ties = analyzer.analyze_strategic_ties()
+
+        patterns = (micro_patterns + hidden_cycles + near_cycles +
+                    entropy_patterns + regime_patterns +
+                    compensation_patterns + strategic_ties)
+
+        risk = analyzer.assess_risk(patterns)
+        manipulation = analyzer.detect_manipulation(patterns, risk)
+        prediction = analyzer.make_prediction(patterns, risk, manipulation)
+
+    st.markdown(f"## Avaliação Geral 🚦")
+    st.markdown(f"- **Risco:** {risk['level'].upper()}  |  **Manipulação:** {manipulation['level'].upper()}")
+
+    with st.expander("Fatores de Risco Detectados"):
+        if risk['factors']:
+            for f in risk['factors']:
+                st.write(f"- {f}")
+        else:
+            st.write("Nenhum fator de risco significativo.")
+
+    with st.expander("Sinais de Manipulação"):
+        if manipulation['signs']:
+            for s in manipulation['signs']:
+                st.write(f"- {s}")
+        else:
+            st.write("Sem sinais de manipulação.")
+
+    with st.expander("Padrões Detectados"):
+        if patterns:
+            for p in patterns:
+                risk_level = p.get('risk', 'N/A')
+                st.write(f"- {p['description']} (Tipo: {p['type']}, Risco: {risk_level})")
+        else:
+            st.write("Nenhum padrão significativo detectado.")
+
+    st.header("Predição")
+    if prediction['color']:
+        color_emoji = {'V': '🔴', 'C': '🔵', 'E': '🟡'}.get(prediction['color'], prediction['color'])
+        st.write(f"**Aposta sugerida:** {color_emoji}  (Confiança: {prediction['confidence']:.1f}%)")
+        st.write(prediction['reasoning'])
+        st.write(f"*Estratégia: {prediction['strategy']}*")
+    else:
+        st.write(prediction['reasoning'])
+
+
+if __name__ == "__main__":
+    main()
