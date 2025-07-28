@@ -6,8 +6,7 @@ import math
 
 class MarkovModel:
     """
-    Modelo simples de cadeia de Markov de ordem 1 para transições entre estados ('V', 'C').
-    Ajuda a estimar a probabilidade condicional do próximo evento dado o atual.
+    Cadeia de Markov de ordem 1 para modelar as transições dos eventos ('V', 'C').
     """
     def __init__(self):
         self.transitions: Dict[str, Counter] = defaultdict(Counter)
@@ -71,7 +70,6 @@ class CasinoAnalyzer:
         non_empate = [r for r in self.results if r != 'E']
         if len(non_empate) < 12:
             return patterns
-
         for cycle_size in range(3, 7):
             cycles = [''.join(non_empate[i:i + cycle_size]) for i in range(len(non_empate) - cycle_size + 1)]
             cycle_counts = Counter(cycles)
@@ -97,9 +95,7 @@ class CasinoAnalyzer:
         n = len(non_empate)
         if n < 20:
             return patterns
-
         windows = [12, 15, 18]
-
         for window_size in windows:
             if n >= window_size:
                 window = non_empate[-window_size:]
@@ -107,7 +103,6 @@ class CasinoAnalyzer:
                 v_count = window.count('V')
                 imbalance = abs(c_count - v_count)
                 balance_ratio = imbalance / window_size
-
                 if balance_ratio < 0.1 and window_size >= 15:
                     patterns.append({
                         'type': 'artificial_balance',
@@ -119,7 +114,6 @@ class CasinoAnalyzer:
                         'manipulation': 'Sistema forçando distribuição 50/50',
                         'predictability': 85
                     })
-
                 if balance_ratio > 0.4:
                     underrepresented = 'C' if c_count < v_count else 'V'
                     patterns.append({
@@ -208,7 +202,6 @@ class CasinoAnalyzer:
     def assess_risk(self, patterns: List[Dict[str, Any]]) -> Dict[str, Any]:
         risk_score = 0
         risk_factors = []
-
         for pattern in patterns:
             p_type = pattern['type']
             strength = pattern.get('strength', 0)
@@ -239,7 +232,6 @@ class CasinoAnalyzer:
             elif p_type == 'regime_change':
                 risk_score += 60
                 risk_factors.append(f'⚡ Mudança brusca de padrão detectada')
-
         if risk_score >= 80:
             level = 'critical'
         elif risk_score >= 55:
@@ -248,13 +240,11 @@ class CasinoAnalyzer:
             level = 'medium'
         else:
             level = 'low'
-
         return {'level': level, 'score': min(risk_score, 100), 'factors': risk_factors}
 
     def detect_manipulation(self, patterns: List[Dict[str, Any]], risk: Dict[str, Any]) -> Dict[str, Any]:
         manipulation_score = 0
         manipulation_signs = []
-
         for pattern in patterns:
             predictability = pattern.get('predictability', 0)
             if predictability >= 90:
@@ -266,15 +256,12 @@ class CasinoAnalyzer:
             elif predictability >= 70:
                 manipulation_score += 40
                 manipulation_signs.append(f"⚙️ Padrão suspeito: {pattern['description']}")
-
         if any(p['type'] == 'near_cycle' for p in patterns) and risk['score'] >= 60:
             manipulation_score = max(manipulation_score, 70)
             manipulation_signs.append("🚨 Indícios fortes de manipulação camuflada (quase-ciclos detectados)")
-
         if any(p['type'] == 'low_entropy' for p in patterns) and risk['score'] >= 60:
             manipulation_score = max(manipulation_score, 75)
             manipulation_signs.append("🚨 Sistema altamente previsível detectado (baixa entropia)")
-
         if manipulation_score >= 80:
             level = 'critical'
         elif manipulation_score >= 60:
@@ -283,7 +270,6 @@ class CasinoAnalyzer:
             level = 'medium'
         else:
             level = 'low'
-
         return {'level': level, 'score': min(manipulation_score, 100), 'signs': manipulation_signs}
 
     def build_markov_model(self) -> Optional[MarkovModel]:
@@ -324,21 +310,18 @@ class CasinoAnalyzer:
 
     def make_prediction(self, patterns: List[Dict[str, Any]], risk: Dict[str, Any], manipulation: Dict[str, Any]) -> Dict[str, Any]:
         prediction = {'color': None, 'confidence': 0, 'reasoning': '', 'strategy': 'AGUARDAR MELHORES CONDIÇÕES'}
-
         if risk['level'] == 'critical' or manipulation['level'] == 'critical':
             prediction.update({
                 'reasoning': '🚨 CONDIÇÕES CRÍTICAS - Manipulação máxima detectada',
                 'strategy': 'PARAR COMPLETAMENTE'
             })
             return prediction
-
         if manipulation['level'] == 'high':
             prediction.update({
                 'reasoning': '⛔ Manipulação alta - Evitar apostas',
                 'strategy': 'AGUARDAR NORMALIZAÇÃO'
             })
             return prediction
-
         mm = self.build_markov_model()
         markov_pred = self.evaluate_markov_prediction(mm) if mm else {}
 
@@ -385,11 +368,9 @@ class CasinoAnalyzer:
         non_empate = [r for r in self.results if r != 'E']
         if not non_empate:
             return prediction
-
         counter = Counter(non_empate)
         most_common_color, count = counter.most_common(1)[0]
         confidence = (count / len(non_empate)) * 100
-
         prediction.update({
             'color': most_common_color,
             'confidence': min(confidence, 75),
@@ -439,7 +420,6 @@ def main():
     if col_undo.button("Apagar Último Resultado"):
         if st.session_state.history:
             st.session_state.history.pop()
-            # Remova também últimas predições/acertos para manter sincronizado
             if st.session_state.predictions_log:
                 st.session_state.predictions_log.pop()
             if st.session_state.accuracy_log:
@@ -457,7 +437,6 @@ def main():
 
     analyzer = CasinoAnalyzer(st.session_state.history)
 
-    # Executa análise e predição
     micro_patterns = analyzer.analyze_micro_patterns()
     hidden_cycles = analyzer.detect_hidden_cycles()
     near_cycles = analyzer.detect_near_cycles()
@@ -474,21 +453,32 @@ def main():
     manipulation = analyzer.detect_manipulation(patterns, risk)
     prediction = analyzer.make_prediction(patterns, risk, manipulation)
 
-    # Conferir automaticamente se a predição anterior acertou
+    # Conferir automaticamente se a predição anterior acertou (com lógica corrigida)
     non_empate = [r for r in st.session_state.history if r != 'E']
-    idx_to_check = len(st.session_state.predictions_log)
-    # Se existe resultado novo para comparar com predição anterior
-    if len(non_empate) > idx_to_check:
-        if idx_to_check > 0:
-            prev_pred = st.session_state.predictions_log[-1]
-            real_result = non_empate[idx_to_check - 1]  # resultado do próximo esperado naquela predição
-            acertou = prev_pred.get('color') == real_result if prev_pred.get('color') else False
-            st.session_state.accuracy_log.append(acertou)
-        # Registra nova predição para o próximo evento
+    idx_to_check = len(st.session_state.predictions_log)  # índice da próxima predição que vai ser feita
+
+    # Só conferir se:
+    # - Há pelo menos 2 resultados para ter "próximo"
+    # - Há predições feitas
+    if len(non_empate) >= 2 and len(st.session_state.predictions_log) > 0:
+        pred_index = len(st.session_state.predictions_log) - 1  # última predição registrada
+        real_index = pred_index + 1  # índice real do resultado esperado nessa predição
+
+        if real_index < len(non_empate):
+            prev_pred = st.session_state.predictions_log[pred_index]
+            real_result = non_empate[real_index]
+
+            if prev_pred.get('color') is not None:
+                # Só registra se ainda não registrado para essa predição
+                if len(st.session_state.accuracy_log) < len(st.session_state.predictions_log):
+                    acertou = (prev_pred['color'] == real_result)
+                    st.session_state.accuracy_log.append(acertou)
+
+    # Registra a nova predição se ainda não existe para o índice atual
+    if len(st.session_state.predictions_log) < len(non_empate):
         st.session_state.predictions_log.append(prediction)
 
-    # Apresenta resultados na interface
-
+    # Apresentação simplificada e limpa na interface
     st.markdown(f"## Avaliação Geral 🚦")
     st.markdown(f"- **Risco:** {risk['level'].upper()}  |  **Manipulação:** {manipulation['level'].upper()}")
 
@@ -523,7 +513,6 @@ def main():
     else:
         st.write(prediction['reasoning'])
 
-    # Painel de performance automático
     st.markdown("---")
     st.markdown("## Performance do Sistema de Predição")
     if st.session_state.accuracy_log:
