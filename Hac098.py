@@ -1,7 +1,27 @@
 import streamlit as st
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import List, Dict, Any, Optional
 import math
+
+
+class MarkovModel:
+    """
+    Modelo simples de cadeia de Markov de ordem 1 para transições entre estados ('V', 'C').
+    Ajuda a estimar a probabilidade condicional do próximo evento dado o atual.
+    """
+    def __init__(self):
+        self.transitions: Dict[str, Counter] = defaultdict(Counter)
+
+    def train(self, sequence: List[str]):
+        for i in range(len(sequence) - 1):
+            self.transitions[sequence[i]][sequence[i + 1]] += 1
+
+    def predict_next_prob(self, current: str) -> Dict[str, float]:
+        counts = self.transitions.get(current, {})
+        total = sum(counts.values())
+        if total == 0:
+            return {}
+        return {k: v / total for k, v in counts.items()}
 
 
 class CasinoAnalyzer:
@@ -51,9 +71,6 @@ class CasinoAnalyzer:
         return patterns
 
     def detect_hidden_cycles(self) -> List[Dict[str, Any]]:
-        """
-        Detecta ciclos ocultos no histórico com repetições exatas.
-        """
         patterns = []
         non_empate = [r for r in self.results if r != 'E']
         if len(non_empate) < 12:
@@ -79,9 +96,6 @@ class CasinoAnalyzer:
         return patterns
 
     def analyze_compensation_patterns(self) -> List[Dict[str, Any]]:
-        """
-        Detecta padrões de compensação nas distribuições de resultados para identificar manipulação.
-        """
         patterns = []
         non_empate = [r for r in self.results if r != 'E']
         n = len(non_empate)
@@ -126,15 +140,77 @@ class CasinoAnalyzer:
         return patterns
 
     def analyze_strategic_ties(self) -> List[Dict[str, Any]]:
-        """
-        Método placeholder para empates estratégicos (não implementado).
-        """
+        # Placeholder, pode ser customizado para empates
         return []
 
+    def shannon_entropy(self, data: List[str]) -> float:
+        total = len(data)
+        if total == 0:
+            return 0.0
+        counter = Counter(data)
+        return -sum((count / total) * math.log2(count / total) for count in counter.values())
+
+    def analyze_entropy(self, window=12, low_threshold=1.0) -> List[Dict[str, Any]]:
+        non_empate = [r for r in self.results if r != 'E']
+        if len(non_empate) < window:
+            return []
+        window_data = non_empate[-window:]
+        entropy = self.shannon_entropy(window_data)
+        patterns = []
+        if entropy < low_threshold:
+            patterns.append({
+                'type': 'low_entropy',
+                'entropy': entropy,
+                'risk': 'high',
+                'description': f'Entropia baixa ({entropy:.2f}) nas últimas {window} jogadas (padrão previsível)'
+            })
+        return patterns
+
+    def detect_regime_change(self, window=15) -> List[Dict[str, Any]]:
+        non_empate = [r for r in self.results if r != 'E']
+        patterns = []
+        if len(non_empate) < 2 * window:
+            return patterns
+        early = non_empate[-2 * window:-window]
+        late = non_empate[-window:]
+        freq_early = Counter(early)
+        freq_late = Counter(late)
+        total_early = len(early)
+        total_late = len(late)
+        diff_C = abs((freq_early.get('C', 0) / total_early) - (freq_late.get('C', 0) / total_late))
+        diff_V = abs((freq_early.get('V', 0) / total_early) - (freq_late.get('V', 0) / total_late))
+        if max(diff_C, diff_V) > 0.3:
+            patterns.append({
+                'type': 'regime_change',
+                'risk': 'high',
+                'description': f'Mudança brusca de padrão em {window} jogos (ΔC:{diff_C:.2f}, ΔV:{diff_V:.2f})'
+            })
+        return patterns
+
+    def detect_near_cycles(self, cycle_size=3, max_misses=1) -> List[Dict[str, Any]]:
+        non_empate = [r for r in self.results if r != 'E']
+        patterns = []
+        if len(non_empate) < cycle_size * 2:
+            return patterns
+        segments = [''.join(non_empate[i:i + cycle_size]) for i in range(len(non_empate) - cycle_size + 1)]
+        for i, seg_a in enumerate(segments):
+            for j, seg_b in enumerate(segments):
+                if i >= j:
+                    continue
+                misses = sum(a != b for a, b in zip(seg_a, seg_b))
+                if 0 < misses <= max_misses:
+                    patterns.append({
+                        'type': 'near_cycle',
+                        'pattern': seg_a,
+                        'similar_to': seg_b,
+                        'misses': misses,
+                        'cycle_size': cycle_size,
+                        'risk': 'high' if misses == 1 else 'medium',
+                        'description': f'Quase-ciclo: "{seg_a}" ~ "{seg_b}" ({misses} divergência)'
+                    })
+        return patterns
+
     def assess_risk(self, patterns: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Avalia o risco geral com base nos padrões detectados, incluindo os novos padrões.
-        """
         risk_score = 0
         risk_factors = []
 
@@ -159,7 +235,6 @@ class CasinoAnalyzer:
             elif p_type.startswith('strategic_tie'):
                 risk_score += 40
                 risk_factors.append('🔶 Empate estratégico detectado')
-            # Novos padrões:
             elif p_type == 'near_cycle':
                 risk_score += 65
                 risk_factors.append(f'🌀 Quase-ciclo detectado: {pattern["description"]}')
@@ -182,9 +257,6 @@ class CasinoAnalyzer:
         return {'level': level, 'score': min(risk_score, 100), 'factors': risk_factors}
 
     def detect_manipulation(self, patterns: List[Dict[str, Any]], risk: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Avalia o nível geral de manipulação com base nos padrões detectados.
-        """
         manipulation_score = 0
         manipulation_signs = []
 
@@ -200,12 +272,11 @@ class CasinoAnalyzer:
                 manipulation_score += 40
                 manipulation_signs.append(f"⚙️ Padrão suspeito: {pattern['description']}")
 
-        # Reforce manipulação se há near_cycles ou baixa entropia com risco elevado
-        if any(p['type']=='near_cycle' for p in patterns) and risk['score'] >= 60:
+        if any(p['type'] == 'near_cycle' for p in patterns) and risk['score'] >= 60:
             manipulation_score = max(manipulation_score, 70)
             manipulation_signs.append("🚨 Indícios fortes de manipulação camuflada (quase-ciclos detectados)")
 
-        if any(p['type']=='low_entropy' for p in patterns) and risk['score'] >= 60:
+        if any(p['type'] == 'low_entropy' for p in patterns) and risk['score'] >= 60:
             manipulation_score = max(manipulation_score, 75)
             manipulation_signs.append("🚨 Sistema altamente previsível detectado (baixa entropia)")
 
@@ -220,27 +291,79 @@ class CasinoAnalyzer:
 
         return {'level': level, 'score': min(manipulation_score, 100), 'signs': manipulation_signs}
 
+    def build_markov_model(self) -> Optional[MarkovModel]:
+        non_empate = [r for r in self.results if r != 'E']
+        if len(non_empate) < 20:
+            return None
+        mm = MarkovModel()
+        mm.train(non_empate)
+        return mm
+
+    def evaluate_markov_prediction(self, mm: MarkovModel) -> Dict[str, Any]:
+        """
+        Avalia a probabilidade do próximo evento segundo a cadeia de Markov.
+        Retorna padrão de risco e sugestão baseado na probabilidade.
+        """
+        non_empate = [r for r in self.results if r != 'E']
+        if not non_empate or mm is None:
+            return {}
+
+        last = non_empate[-1]
+        probs = mm.predict_next_prob(last)
+        if not probs:
+            return {}
+
+        # Encontra cor com maior probabilidade
+        most_prob_color = max(probs, key=probs.get)
+        max_prob = probs[most_prob_color]
+
+        # Define risco por baixa probabilidade máxima (baixa certeza)
+        if max_prob < 0.4:
+            risk = 'high'
+            description = f'Modelo Markov: próxima jogada incerta, probabilidade máxima {max_prob:.2f}'
+        else:
+            risk = 'low'
+            description = f'Modelo Markov: próxima jogada mais provável é "{most_prob_color}" com probabilidade {max_prob:.2f}'
+
+        return {
+            'type': 'markov_prediction',
+            'predicted_color': most_prob_color,
+            'probability': max_prob,
+            'risk': risk,
+            'description': description
+        }
+
     def make_prediction(self, patterns: List[Dict[str, Any]], risk: Dict[str, Any], manipulation: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Baseia a predição nos níveis de risco/manipulação e padrões detectados.
-        Em presença de manipulação grave, recomenda evitar apostas.
+        Combina heurística e modelo Markov para predição final, equilibrando confiança e riscos.
         """
         prediction = {'color': None, 'confidence': 0, 'reasoning': '', 'strategy': 'AGUARDAR MELHORES CONDIÇÕES'}
 
-        # Recomenda parar em casos críticos de risco/manipulação
+        # Parada imediata se risco critico/manipulação critica
         if risk['level'] == 'critical' or manipulation['level'] == 'critical':
-            prediction['reasoning'] = '🚨 CONDIÇÕES CRÍTICAS - Manipulação máxima detectada'
-            prediction['strategy'] = 'PARAR COMPLETAMENTE'
+            prediction.update({
+                'reasoning': '🚨 CONDIÇÕES CRÍTICAS - Manipulação máxima detectada',
+                'strategy': 'PARAR COMPLETAMENTE'
+            })
             return prediction
 
-        # Recomenda evitar apostas em alto nível de manipulação (mas não crítico)
+        # Evitar apostas em alto nível de manipulação
         if manipulation['level'] == 'high':
-            prediction['reasoning'] = '⛔ Manipulação alta - Evitar apostas'
-            prediction['strategy'] = 'AGUARDAR NORMALIZAÇÃO'
+            prediction.update({
+                'reasoning': '⛔ Manipulação alta - Evitar apostas',
+                'strategy': 'AGUARDAR NORMALIZAÇÃO'
+            })
             return prediction
 
-        # Detecta padrão de compensação e sugere aposta caso risco e manipulação baixos
+        # Usa Markov para previsão probabilística adicional
+        mm = self.build_markov_model()
+        markov_pred = self.evaluate_markov_prediction(mm) if mm else {}
+
+        # Ajusta decisão com base nas análises heurísticas + markov
         compensation_pattern = next((p for p in patterns if p['type'] == 'compensation_pending'), None)
+        cycle_pattern = next((p for p in patterns if p['type'] == 'hidden_cycle' and p.get('repetitions', 0) >= 2), None)
+
+        # Caso de compensação e baixo risco
         if compensation_pattern and risk['level'] == 'low' and manipulation['level'] == 'low':
             color = compensation_pattern['favored_color']
             confidence = min(75, 55 + (compensation_pattern['strength'] * 20))
@@ -252,8 +375,7 @@ class CasinoAnalyzer:
             })
             return prediction
 
-        # Tenta seguir ciclos ocultos confiáveis
-        cycle_pattern = next((p for p in patterns if p['type'] == 'hidden_cycle' and p.get('repetitions', 0) >= 2), None)
+        # Seguir ciclo se conferido e risco baixo
         if cycle_pattern and risk['level'] == 'low' and manipulation['level'] == 'low':
             next_color = self.predict_next_in_cycle(cycle_pattern['pattern'])
             if next_color:
@@ -265,7 +387,23 @@ class CasinoAnalyzer:
                 })
                 return prediction
 
-        # Predição baseada na frequência histórica (fallback)
+        # Se Markov tem alta probabilidade para um próximo evento
+        if markov_pred:
+            prob = markov_pred['probability']
+            color = markov_pred['predicted_color']
+            risk_markov = markov_pred['risk']
+
+            if prob >= 0.5 and risk_markov == 'low' and risk['level'] in ['low', 'medium'] and manipulation['level'] == 'low':
+                confidence = min(65, prob * 100)
+                prediction.update({
+                    'color': color,
+                    'confidence': confidence,
+                    'reasoning': f'Predição baseada em cadeia de Markov: {markov_pred["description"]}',
+                    'strategy': 'APOSTAR BASEADO EM MODELO ESTOCÁSTICO'
+                })
+                return prediction
+
+        # Fallback para aposta na cor mais frequente no histórico se nada acima
         non_empate = [r for r in self.results if r != 'E']
         if not non_empate:
             return prediction
@@ -283,10 +421,6 @@ class CasinoAnalyzer:
         return prediction
 
     def predict_next_in_cycle(self, pattern: str) -> Optional[str]:
-        """
-        Prediz o próximo resultado do padrão do ciclo somente se o histórico atual corresponde
-        perfeitamente ao ciclo até o momento, caso contrário retorna None.
-        """
         non_empate = [r for r in self.results if r != 'E']
         if not pattern or not non_empate:
             return None
@@ -296,88 +430,6 @@ class CasinoAnalyzer:
                 return None
         pos = len(non_empate) % cycle_len
         return pattern[pos]
-
-    # --- NOVOS MÉTODOS PARA MANIPULAÇÃO INTELIGENTE ---
-
-    def detect_near_cycles(self, cycle_size=3, max_misses=1) -> List[Dict[str, Any]]:
-        """
-        Detecta padrões de ciclos quase idênticos (aceitando até max_misses de diferenças)
-        para identificar manipulações que quebram ciclos intencionalmente.
-        """
-        non_empate = [r for r in self.results if r != 'E']
-        patterns = []
-        if len(non_empate) < cycle_size * 2:
-            return patterns
-        segments = [''.join(non_empate[i:i + cycle_size]) for i in range(len(non_empate) - cycle_size + 1)]
-        for i, seg_a in enumerate(segments):
-            for j, seg_b in enumerate(segments):
-                if i >= j:
-                    continue
-                misses = sum(a != b for a, b in zip(seg_a, seg_b))
-                if 0 < misses <= max_misses:
-                    patterns.append({
-                        'type': 'near_cycle',
-                        'pattern': seg_a,
-                        'similar_to': seg_b,
-                        'misses': misses,
-                        'cycle_size': cycle_size,
-                        'risk': 'high' if misses == 1 else 'medium',
-                        'description': f'Quase-ciclo: "{seg_a}" ~ "{seg_b}" ({misses} divergência)'
-                    })
-        return patterns
-
-    def shannon_entropy(self, data: List[str]) -> float:
-        """
-        Calcula a entropia de Shannon para uma lista de dados.
-        """
-        total = len(data)
-        if total == 0:
-            return 0.0
-        counter = Counter(data)
-        return -sum((count / total) * math.log2(count / total) for count in counter.values())
-
-    def analyze_entropy(self, window=12, low_threshold=1.0) -> List[Dict[str, Any]]:
-        """
-        Avalia a entropia dos últimos N resultados para detectar baixa aleatoriedade.
-        """
-        non_empate = [r for r in self.results if r != 'E']
-        if len(non_empate) < window:
-            return []
-        window_data = non_empate[-window:]
-        entropy = self.shannon_entropy(window_data)
-        patterns = []
-        if entropy < low_threshold:
-            patterns.append({
-                'type': 'low_entropy',
-                'entropy': entropy,
-                'risk': 'high',
-                'description': f'Entropia baixa ({entropy:.2f}) nas últimas {window} jogadas (padrão previsível)'
-            })
-        return patterns
-
-    def detect_regime_change(self, window=15) -> List[Dict[str, Any]]:
-        """
-        Detecta mudanças bruscas de padrão entre duas janelas consecutivas no histórico.
-        """
-        non_empate = [r for r in self.results if r != 'E']
-        patterns = []
-        if len(non_empate) < 2 * window:
-            return patterns
-        early = non_empate[-2 * window:-window]
-        late = non_empate[-window:]
-        freq_early = Counter(early)
-        freq_late = Counter(late)
-        total_early = len(early)
-        total_late = len(late)
-        diff_C = abs((freq_early.get('C', 0) / total_early) - (freq_late.get('C', 0) / total_late))
-        diff_V = abs((freq_early.get('V', 0) / total_early) - (freq_late.get('V', 0) / total_late))
-        if max(diff_C, diff_V) > 0.3:
-            patterns.append({
-                'type': 'regime_change',
-                'risk': 'high',
-                'description': f'Mudança brusca de padrão em {window} jogos (ΔC:{diff_C:.2f}, ΔV:{diff_V:.2f})'
-            })
-        return patterns
 
 
 def main():
@@ -406,64 +458,11 @@ def main():
     if st.session_state.history:
         st.write("### Histórico Atual (Mais recente à esquerda):")
         color_map = {'V': '🔴', 'C': '🔵', 'E': '🟡'}
-        history_display = ' '.join(color_map.get(r, '⬜') + r for r in reversed(st.session_state.history))
-        st.markdown(history_display)
-        st.write("**Nota:** Histórico mostrado do resultado mais recente (esquerda) ao mais antigo (direita).")
+        history_display = ''.join(color_map.get(r, '⬜') for r in reversed(st.session_state.history))
+        st.markdown(f"**{history_display}**")
+        st.write("*Nota: Histórico mostrado do resultado mais recente (esquerda) ao mais antigo (direita).")
     else:
         st.info("Use os botões acima para inserir resultados e iniciar análise.")
         return
 
-    analyzer = CasinoAnalyzer(st.session_state.history)
-
-    with st.spinner('Analisando dados...'):
-        micro_patterns = analyzer.analyze_micro_patterns()
-        hidden_cycles = analyzer.detect_hidden_cycles()
-        near_cycles = analyzer.detect_near_cycles()
-        entropy_patterns = analyzer.analyze_entropy()
-        regime_patterns = analyzer.detect_regime_change()
-        compensation_patterns = analyzer.analyze_compensation_patterns()
-        strategic_ties = analyzer.analyze_strategic_ties()
-
-        patterns = (micro_patterns + hidden_cycles + near_cycles +
-                    entropy_patterns + regime_patterns +
-                    compensation_patterns + strategic_ties)
-
-        risk = analyzer.assess_risk(patterns)
-        manipulation = analyzer.detect_manipulation(patterns, risk)
-        prediction = analyzer.make_prediction(patterns, risk, manipulation)
-
-    st.header("Padrões Detectados")
-    if patterns:
-        for p in patterns:
-            risk_level = p.get('risk', 'N/A')
-            st.write(f"- {p['description']} (Tipo: {p['type']}, Risco: {risk_level})")
-    else:
-        st.write("Nenhum padrão significativo detectado.")
-
-    st.header("Avaliação de Risco")
-    st.write(f"Nível: **{risk['level'].upper()}** - Score: {risk['score']}")
-    if risk['factors']:
-        for f in risk['factors']:
-            st.write(f"- {f}")
-
-    st.header("Avaliação de Manipulação")
-    st.write(f"Nível: **{manipulation['level'].upper()}** - Score: {manipulation['score']}")
-    if manipulation['signs']:
-        for s in manipulation['signs']:
-            st.write(f"- {s}")
-
-    st.header("Predição")
-    if prediction['color']:
-        color_map = {'V': '🔴', 'C': '🔵', 'E': '🟡'}
-        emoji_color = color_map.get(prediction['color'], prediction['color'])
-        st.write(f"Aposta sugerida: **{emoji_color}**")
-        st.write(f"Confiança: **{prediction['confidence']:.1f}%**")
-        st.write(f"Razão: {prediction['reasoning']}")
-        st.write(f"Estratégia: {prediction['strategy']}")
-    else:
-        st.write("Sem predição confiável disponível no momento.")
-        st.write(prediction['reasoning'])
-
-
-if __name__ == "__main__":
-    main()
+    analyzer = 
