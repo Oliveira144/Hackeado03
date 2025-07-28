@@ -284,22 +284,18 @@ class CasinoAnalyzer:
         non_empate = [r for r in self.results if r != 'E']
         if not non_empate or mm is None:
             return {}
-
         last = non_empate[-1]
         probs = mm.predict_next_prob(last)
         if not probs:
             return {}
-
         most_prob_color = max(probs, key=probs.get)
         max_prob = probs[most_prob_color]
-
         if max_prob < 0.4:
             risk = 'high'
             description = f'Modelo Markov: próxima jogada incerta, probabilidade máxima {max_prob:.2f}'
         else:
             risk = 'low'
             description = f'Modelo Markov: próxima jogada mais provável é "{most_prob_color}" com probabilidade {max_prob:.2f}'
-
         return {
             'type': 'markov_prediction',
             'predicted_color': most_prob_color,
@@ -310,25 +306,32 @@ class CasinoAnalyzer:
 
     def make_prediction(self, patterns: List[Dict[str, Any]], risk: Dict[str, Any], manipulation: Dict[str, Any]) -> Dict[str, Any]:
         prediction = {'color': None, 'confidence': 0, 'reasoning': '', 'strategy': 'AGUARDAR MELHORES CONDIÇÕES'}
-        if risk['level'] == 'critical' or manipulation['level'] == 'critical':
+        # A lógica abaixo garante que o sistema só fica em parada se risco e manipulação forem críticos;
+        # caso contrário, ele sempre tenta gerar a predição.
+        if risk['level'] == 'critical' and manipulation['level'] == 'critical':
             prediction.update({
-                'reasoning': '🚨 CONDIÇÕES CRÍTICAS - Manipulação máxima detectada',
+                'reasoning': ('🚨 CONDIÇÕES CRÍTICAS - Manipulação máxima detectada. '
+                              'Parada recomendada, mas o sistema continuará reavaliando em novos dados.'),
                 'strategy': 'PARAR COMPLETAMENTE'
             })
+            # A predição fica vazia para indicar pausa, mas a interface vai continuar exibindo.
             return prediction
+
         if manipulation['level'] == 'high':
             prediction.update({
-                'reasoning': '⛔ Manipulação alta - Evitar apostas',
+                'reasoning': '⛔ Manipulação alta - Recomenda-se evitar apostas temporariamente.',
                 'strategy': 'AGUARDAR NORMALIZAÇÃO'
             })
+            # Não para o sistema permanentemente, só recomenda aguardar.
             return prediction
+
         mm = self.build_markov_model()
         markov_pred = self.evaluate_markov_prediction(mm) if mm else {}
 
         compensation_pattern = next((p for p in patterns if p['type'] == 'compensation_pending'), None)
         cycle_pattern = next((p for p in patterns if p['type'] == 'hidden_cycle' and p.get('repetitions', 0) >= 2), None)
 
-        if compensation_pattern and risk['level'] == 'low' and manipulation['level'] == 'low':
+        if compensation_pattern and risk['level'] in ['low', 'medium'] and manipulation['level'] in ['low', 'medium']:
             color = compensation_pattern['favored_color']
             confidence = min(75, 55 + (compensation_pattern['strength'] * 20))
             prediction.update({
@@ -339,7 +342,7 @@ class CasinoAnalyzer:
             })
             return prediction
 
-        if cycle_pattern and risk['level'] == 'low' and manipulation['level'] == 'low':
+        if cycle_pattern and risk['level'] in ['low', 'medium'] and manipulation['level'] in ['low', 'medium']:
             next_color = self.predict_next_in_cycle(cycle_pattern['pattern'])
             if next_color:
                 prediction.update({
@@ -354,8 +357,7 @@ class CasinoAnalyzer:
             prob = markov_pred['probability']
             color = markov_pred['predicted_color']
             risk_markov = markov_pred['risk']
-
-            if prob >= 0.5 and risk_markov == 'low' and risk['level'] in ['low', 'medium'] and manipulation['level'] == 'low':
+            if prob >= 0.5 and risk_markov == 'low' and risk['level'] in ['low', 'medium'] and manipulation['level'] in ['low', 'medium']:
                 confidence = min(65, prob * 100)
                 prediction.update({
                     'color': color,
@@ -368,6 +370,7 @@ class CasinoAnalyzer:
         non_empate = [r for r in self.results if r != 'E']
         if not non_empate:
             return prediction
+
         counter = Counter(non_empate)
         most_common_color, count = counter.most_common(1)[0]
         confidence = (count / len(non_empate)) * 100
@@ -398,7 +401,7 @@ def main():
         st.session_state.history = []
 
     if 'predictions_log' not in st.session_state:
-        st.session_state.predictions_log = []  # lista de predições feitas
+        st.session_state.predictions_log = []  # lista das predições feitas
 
     if 'accuracy_log' not in st.session_state:
         st.session_state.accuracy_log = []  # lista booleana de acertos/erros
@@ -453,32 +456,25 @@ def main():
     manipulation = analyzer.detect_manipulation(patterns, risk)
     prediction = analyzer.make_prediction(patterns, risk, manipulation)
 
-    # Conferir automaticamente se a predição anterior acertou (com lógica corrigida)
+    # Conferência automática e sincronizada das predições e resultados
     non_empate = [r for r in st.session_state.history if r != 'E']
-    idx_to_check = len(st.session_state.predictions_log)  # índice da próxima predição que vai ser feita
+    idx_to_check = len(st.session_state.predictions_log)
 
-    # Só conferir se:
-    # - Há pelo menos 2 resultados para ter "próximo"
-    # - Há predições feitas
     if len(non_empate) >= 2 and len(st.session_state.predictions_log) > 0:
-        pred_index = len(st.session_state.predictions_log) - 1  # última predição registrada
-        real_index = pred_index + 1  # índice real do resultado esperado nessa predição
-
+        pred_index = len(st.session_state.predictions_log) - 1
+        real_index = pred_index + 1
         if real_index < len(non_empate):
             prev_pred = st.session_state.predictions_log[pred_index]
             real_result = non_empate[real_index]
-
             if prev_pred.get('color') is not None:
-                # Só registra se ainda não registrado para essa predição
                 if len(st.session_state.accuracy_log) < len(st.session_state.predictions_log):
                     acertou = (prev_pred['color'] == real_result)
                     st.session_state.accuracy_log.append(acertou)
 
-    # Registra a nova predição se ainda não existe para o índice atual
     if len(st.session_state.predictions_log) < len(non_empate):
         st.session_state.predictions_log.append(prediction)
 
-    # Apresentação simplificada e limpa na interface
+    # Exibição resumo
     st.markdown(f"## Avaliação Geral 🚦")
     st.markdown(f"- **Risco:** {risk['level'].upper()}  |  **Manipulação:** {manipulation['level'].upper()}")
 
@@ -522,7 +518,6 @@ def main():
         st.markdown(f"- Total de predições avaliadas: {total}")
         st.markdown(f"- Total de acertos: {acertos}")
         st.markdown(f"- Taxa de acerto: **{precisao:.2f}%**")
-
         with st.expander("Histórico de Acertos/Erros (últimas 20 predições)"):
             ultimos = st.session_state.accuracy_log[-20:]
             start_idx = total - len(ultimos) + 1
