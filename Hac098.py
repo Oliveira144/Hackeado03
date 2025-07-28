@@ -3,7 +3,7 @@ from collections import Counter, defaultdict
 from typing import List, Dict, Any, Optional
 import math
 
-# Parâmetros para filtro da janela de análise (foco nos últimos 10 a 27 eventos)
+# Parâmetros para janela de análise (foco nos últimos 10 a 27 resultados)
 WINDOW_MIN = 10
 WINDOW_MAX = 27
 
@@ -34,11 +34,15 @@ class CasinoAnalyzer:
         self.results = results
 
     def _extract_window(self) -> List[str]:
-        # Prioriza análise nos últimos 10 a 27 resultados
-        window = self.results[-WINDOW_MAX:] if len(self.results) >= WINDOW_MAX else self.results[:]
-        if len(window) < WINDOW_MIN:
+        total = len(self.results)
+        if total < WINDOW_MIN:
             return []
-        return window[-WINDOW_MIN:]
+        elif WINDOW_MIN <= total <= WINDOW_MAX:
+            # Prioriza analisar toda a janela de resultados entre 10 e 27 (todos resultados disponíveis até 27)
+            return self.results[:]
+        else:
+            # Para mais de 27 resultados, considera sempre os últimos 27 resultados
+            return self.results[-WINDOW_MAX:]
 
     def analyze_patterns(self) -> List[Dict[str, Any]]:
         patterns = []
@@ -218,36 +222,40 @@ def main():
         st.info("Use os botões acima para inserir os resultados do jogo e iniciar a análise.")
         return
 
-    # Mostra histórico visual
+    # Mostrar histórico com emojis (mais recente à esquerda)
     st.subheader("Histórico atual (mais recente à esquerda):")
     color_map = {'V': '🔴', 'C': '🔵', 'E': '🟡'}
     hist_disp = ''.join(color_map.get(r, '⬜') for r in reversed(st.session_state.history))
     st.markdown(f"**{hist_disp}**")
 
-    # Executa análise
+    # Executar análise
     analyzer = CasinoAnalyzer(st.session_state.history)
     patterns = analyzer.analyze_patterns()
     risk = analyzer.risk_and_signal(patterns)
     markov_pred = analyzer.markov_predict()
 
-    # Conferência automática da predição x resultado real
+    # Conferência automática da última predição e resultado real
     eventos = [r for r in st.session_state.history if r in ['C', 'V']]
-    idx_pred = len(st.session_state.predictions_log)
     if len(eventos) >= 2 and len(st.session_state.predictions_log) > 0:
         pred_idx = len(st.session_state.predictions_log) - 1
         real_idx = pred_idx + 1
         if real_idx < len(eventos):
             prev_pred = st.session_state.predictions_log[pred_idx]
             real_result = eventos[real_idx]
-            if prev_pred.get('color') is not None:
+            # Só considerar predições válidas e risco não crítico para conferência
+            if prev_pred.get('color') is not None and prev_pred.get('risk_level') != 'crítico':
                 if len(st.session_state.accuracy_log) < len(st.session_state.predictions_log):
-                    acertou = prev_pred.get('color') == real_result
+                    acertou = (prev_pred['color'] == real_result)
                     st.session_state.accuracy_log.append(acertou)
 
+    # Registrar predição somente se válida e risco não crítico
     if len(st.session_state.predictions_log) < len(eventos):
-        st.session_state.predictions_log.append(markov_pred)
+        if markov_pred.get('color') is not None and risk != 'crítico':
+            pred_to_add = markov_pred.copy()
+            pred_to_add['risk_level'] = risk
+            st.session_state.predictions_log.append(pred_to_add)
 
-    # Exibir avaliação risco
+    # Exibir avaliação de risco e padrões detectados
     st.markdown("## Avaliação de Risco 🚦")
     st.markdown(f"- Nível de risco da janela {WINDOW_MIN}-{WINDOW_MAX}: **{risk}**")
     with st.expander("Padrões detectados e níveis de risco"):
@@ -257,7 +265,7 @@ def main():
         else:
             st.write("Nenhum padrão relevante detectado na janela atual.")
 
-    # Exibir predição e botão de aposta interativo
+    # Predição e botão interativo para aposta
     st.header("Predição do Próximo Resultado")
     if risk == "crítico":
         st.error(
@@ -271,18 +279,17 @@ def main():
         emoji_map = {'V': '🔴', 'C': '🔵'}
         emoji = emoji_map.get(color, None)
 
-        if emoji and conf >= 50:  # Ajuste o limiar conforme preferir
+        if emoji and conf >= 50:  # Você pode ajustar o limiar de confiança aqui
             st.success(f"**Sinal sugerido:** {emoji}  (Confiança: {conf:.1f}%)")
             st.write(f"Base analítica: {support}")
 
-            # Botão para confirmar a entrada
             if st.button(f"Apostar {emoji}"):
                 st.write(f"✅ Entrada registrada para a cor {emoji}. Boa sorte!")
-                # Aqui pode-se acrescentar lógica para registrar a aposta no sistema
+                # Aqui você pode adicionar lógica para registrar aposta ou eventuais ações
         else:
-            st.info("Sem sinal confiável suficiente para sugerir aposta no momento.")
+            st.info("Ainda sem confiança suficiente para sugerir aposta no momento.")
 
-    # Painel de performance da conferência automática
+    # Painel de performance automática
     st.markdown("---")
     st.markdown("## Performance do Sistema (conferência automática)")
     if st.session_state.accuracy_log:
