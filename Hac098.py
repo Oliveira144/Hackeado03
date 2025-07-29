@@ -29,6 +29,7 @@ class MarkovModel:
             return {}
         return {k: v / total for k, v in counts.items()}
 
+
 class CasinoAnalyzer:
     def __init__(self, results: List[str]):
         self.results = results
@@ -36,12 +37,10 @@ class CasinoAnalyzer:
     def _extract_window(self) -> List[str]:
         total = len(self.results)
         if total < WINDOW_MIN:
-            return []
+            return self.results[:]  # Analisar tudo que tem, mesmo menor que WINDOW_MIN
         elif WINDOW_MIN <= total <= WINDOW_MAX:
-            # Prioriza analisar toda a janela de resultados entre 10 e 27 (todos resultados disponíveis até 27)
             return self.results[:]
         else:
-            # Para mais de 27 resultados, considera sempre os últimos 27 resultados
             return self.results[-WINDOW_MAX:]
 
     def analyze_patterns(self) -> List[Dict[str, Any]]:
@@ -53,7 +52,6 @@ class CasinoAnalyzer:
         # Micro-padrão 2x2 repetitivo
         if len(window) >= 6:
             last6 = window[-6:]
-            # Considera apenas C ou V para este padrão, excluindo E
             double_count = sum(1 for i in range(0, 6, 2)
                                if i+1 < 6 and last6[i] == last6[i+1] and last6[i] != 'E')
             if double_count >= 2:
@@ -66,7 +64,6 @@ class CasinoAnalyzer:
 
         # Alta alternância
         if len(window) >= 8:
-            # Conta alternâncias entre C e V, ignorando E
             alt_count = sum(1 for i in range(1, 8)
                             if window[-i] != window[-i-1] and window[-i] != 'E' and window[-i-1] != 'E')
             if alt_count >= 4:
@@ -85,17 +82,14 @@ class CasinoAnalyzer:
             total_cv = len(cv_window)
             diff = abs(c - v)
 
-            # Ajuste para balanço artificial: se a diferença for muito pequena para o tamanho da janela
-            # E se a contagem de C e V é significativa
             if total_cv >= 10 and diff <= 1:
                 patterns.append({
                     'type': 'artificial_balance',
                     'desc': f'Equilíbrio estatístico artificial ({c}C x {v}V)',
                     'risk': 'suspeito'
                 })
-            
-            # Ajuste para compensação pendente: se a diferença for significativa em relação ao total
-            if total_cv >= 10 and diff >= int(0.40 * total_cv): # Limiar de 40% da janela
+
+            if total_cv >= 10 and diff >= int(0.40 * total_cv):
                 favored = 'C' if c < v else 'V'
                 patterns.append({
                     'type': 'compensation_pending',
@@ -104,8 +98,8 @@ class CasinoAnalyzer:
                 })
 
         # Entropia baixa (baixa aleatoriedade) - apenas C e V
-        ent = self.shannon_entropy([x for x in window if x in ['C','V']])
-        if ent < 0.7 and len([x for x in window if x in ['C','V']]) >= WINDOW_MIN: # Garante dados suficientes
+        ent = self.shannon_entropy([x for x in window if x in ['C', 'V']])
+        if ent < 0.7 and len([x for x in window if x in ['C', 'V']]) >= WINDOW_MIN:
             patterns.append({
                 'type': 'low_entropy',
                 'desc': f'Entropia baixa: {ent:.2f}',
@@ -116,10 +110,10 @@ class CasinoAnalyzer:
         for size in [3, 4, 5]:
             if len(window) < 2 * size:
                 continue
-            segments = [''.join(window[i:i+size]) for i in range(len(window)-size+1)]
+            segments = [''.join(window[i:i + size]) for i in range(len(window) - size + 1)]
             counter_segs = Counter(segments)
-            for most_common_seg, count in counter_segs.most_common(1): # Pega o mais comum
-                if count >= 2 and len(most_common_seg) == size: # Garante que é um ciclo repetido
+            for most_common_seg, count in counter_segs.most_common(1):
+                if count >= 2 and len(most_common_seg) == size:
                     risk_level = 'alto' if count == 2 else 'crítico'
                     patterns.append({
                         'type': 'hidden_cycle',
@@ -134,20 +128,17 @@ class CasinoAnalyzer:
         if total == 0:
             return 0.0
         freq = Counter(seq)
-        # Handle cases where log2(0) might occur due to rounding for very small counts if not careful
-        # Using a small epsilon to avoid log(0) for robustness if needed, but Counter ensures counts are > 0
-        return -sum((c/total)*math.log2(c/total) for c in freq.values() if c > 0)
+        return -sum((c / total) * math.log2(c / total) for c in freq.values() if c > 0)
 
     def risk_and_signal(self, patterns: List[Dict[str, Any]]) -> str:
         risk_map = {'crítico': 3, 'alto': 2, 'suspeito': 1}
         score = sum(risk_map.get(p['risk'], 0) for p in patterns)
-        
-        # Ajuste dos limiares para classificação do risco geral
-        if score >= 5: # Um ou mais padrões críticos ou múltiplos altos
+
+        if score >= 5:
             return "crítico"
-        elif score >= 3: # Um padrão alto ou múltiplos suspeitos/mistos
+        elif score >= 3:
             return "alto"
-        elif score >= 1: # Pelo menos um padrão suspeito
+        elif score >= 1:
             return "moderado"
         else:
             return "baixo"
@@ -162,39 +153,34 @@ class CasinoAnalyzer:
 
     def get_dynamic_confidence_threshold(self) -> float:
         """Calcula um limiar de confiança dinâmico baseado na acurácia histórica."""
-        if not st.session_state.accuracy_log:
-            return 0.65 # Limiar padrão inicial, ligeiramente mais conservador
-        
-        total_predictions = len(st.session_state.accuracy_log)
-        if total_predictions < 5: # Precisa de um mínimo de dados para ajustar
+        if 'accuracy_log' not in st.session_state or not st.session_state.accuracy_log:
             return 0.65
-            
+        total_predictions = len(st.session_state.accuracy_log)
+        if total_predictions < 5:
+            return 0.65
         current_accuracy = sum(st.session_state.accuracy_log) / total_predictions
-        
-        # Ajusta o limiar:
-        # Se a acurácia é muito boa, pode-se ser um pouco menos rígido.
-        # Se a acurácia é baixa, ser mais rígido.
         if current_accuracy >= 0.75:
             return 0.55
         elif current_accuracy >= 0.65:
             return 0.60
-        else: # Abaixo de 65% de acurácia, exige mais confiança
+        else:
             return 0.70
-    
-    def markov_predict_adaptive(self) -> Dict[str, Any]:
+
+    def markov_predict_adaptive(self, user_confidence_threshold: Optional[float] = None) -> Dict[str, Any]:
         """
         Realiza a predição Markov adaptativa, combinando resultados de diferentes ordens
-        e usando um limiar de confiança dinâmico.
+        e usando um limiar de confiança dinâmico ou user-defined.
         """
         window = self._extract_window()
-        eventos = [r for r in window if r in ['C', 'V']] # Foco em C e V para Markov
-        
-        if len(eventos) < 6: # Mínimo para alguma análise de padrão e Markov básica
-            return {'color': None, 'conf': 0, 'support': 'Histórico insuficiente para previsão robusta.'}
+        eventos = [r for r in window if r in ['C', 'V']]
+        feedback_msgs = []
+
+        if len(eventos) < 6:
+            feedback_msgs.append('Histórico insuficiente para previsão robusta (menos de 6 eventos C/V).')
+            return {'color': None, 'conf': 0, 'support': ' | '.join(feedback_msgs)}
 
         all_preds_info = []
 
-        # Tenta predições com diferentes ordens de Markov
         # Ordem 3
         if len(eventos) >= 3:
             mk3 = self.build_markov_model(order=3)
@@ -222,45 +208,55 @@ class CasinoAnalyzer:
                     cor, prob = max(probs.items(), key=lambda t: t[1])
                     all_preds_info.append({'color': cor, 'prob': prob, 'order': 1, 'context': eventos[-1:]})
 
-        # Combinação das previsões de Markov
         if all_preds_info:
             combined_scores = defaultdict(float)
             support_details = []
 
+            # Suavização da ponderação (sem adicionar +0.01)
             for pred_info in all_preds_info:
-                # Pondera a previsão: maior ordem e maior probabilidade têm mais peso
-                # Adiciona um pequeno valor para evitar divisão por zero se prob for 0
-                weight = pred_info['order'] * (pred_info['prob'] + 0.01) 
+                weight = pred_info['order'] * pred_info['prob']
                 combined_scores[pred_info['color']] += weight
-                support_details.append(f"Mk({pred_info['order']}) ctxt '{''.join(pred_info['context'])}'->'{pred_info['color']}' ({pred_info['prob']:.2f})")
+                support_details.append(
+                    f"Mk({pred_info['order']}) ctxt '{''.join(pred_info['context'])}' -> "
+                    f"'{pred_info['color']}' ({pred_info['prob']:.2f})"
+                )
 
-            # Encontra a cor com a maior pontuação combinada
             if combined_scores:
                 final_color, max_combined_score = max(combined_scores.items(), key=lambda t: t[1])
-                
-                # Normaliza a pontuação combinada para uma "confiança" percentual
-                # Maxima pontuação possível seria se todas as ordens concordassem com prob 1.0
-                max_possible_score = sum(p['order'] * (1.0 + 0.01) for p in all_preds_info)
-                conf_normalized = (max_combined_score / max_possible_score) if max_possible_score > 0 else 0
+                max_possible_score = sum(p['order'] * 1.0 for p in all_preds_info)
+                conf_normalized = max_combined_score / max_possible_score if max_possible_score > 0 else 0
 
-                dynamic_threshold = self.get_dynamic_confidence_threshold()
-                
+                dynamic_threshold = user_confidence_threshold if user_confidence_threshold is not None else self.get_dynamic_confidence_threshold()
+
                 if conf_normalized >= dynamic_threshold:
                     return {
                         'color': final_color,
                         'conf': conf_normalized * 100,
                         'support': f"Previsão combinada Markov: {' | '.join(support_details)}. Limiar: {dynamic_threshold:.2f}"
                     }
-        
-        # Fallback para frequência simples se Markov não gerar predição robusta
+                else:
+                    feedback_msgs.append(
+                        f"Confiança combinada ({conf_normalized * 100:.1f}%) abaixo do limiar ({dynamic_threshold * 100:.1f}%)."
+                    )
+
+        # Fallback para frequência simples com limiar reduzido para 40%
         freq_eventos = Counter(eventos)
         if freq_eventos:
             cor_freq, q_freq = freq_eventos.most_common(1)[0]
-            conf_freq = (q_freq/len(eventos))*100
-            if conf_freq >= 50: # Mínimo de 50% para frequência simples
-                return {'color': cor_freq, 'conf': conf_freq, 'support': 'Maior frequência na janela recente.'}
+            conf_freq = (q_freq / len(eventos)) * 100
+            if conf_freq >= 40:
+                return {
+                    'color': cor_freq,
+                    'conf': conf_freq,
+                    'support': f"Maior frequência na janela recente (limiar mínimo: 40%)."
+                }
+            else:
+                feedback_msgs.append(
+                    f"Maior frequência {cor_freq} com {conf_freq:.1f}% abaixo do limiar mínimo 40%."
+                )
 
-        return {'color': None, 'conf': 0, 'support': 'Não foi possível gerar previsão robusta com dados atuais.'}
+        feedback_msgs.append("Não foi possível gerar previsão robusta com os dados atuais.")
+        return {'color': None, 'conf': 0, 'support': ' | '.join(feedback_msgs)}
 
 
 def main():
@@ -268,21 +264,30 @@ def main():
     st.title("CasinoAnalyzer PRO - Análise Avançada de Padrões e Predição")
     st.markdown("Analise o comportamento dos resultados e receba sugestões para suas apostas.")
 
+    # Slider no sidebar para ajuste de limiar mínimo de confiança
+    st.sidebar.header("Configurações de Predição")
+    user_threshold = st.sidebar.slider(
+        "Limiar mínimo de confiança para sugerir aposta (%)",
+        min_value=30, max_value=80, value=60, step=1,
+        help="Ajuste o limiar para o nível de confiança exigido para que o sistema sugira apostas."
+    ) / 100.0
+
+    # Inicialização das variáveis de estado
     if 'history' not in st.session_state:
         st.session_state.history = []
     if 'predictions_log' not in st.session_state:
         st.session_state.predictions_log = []
     if 'accuracy_log' not in st.session_state:
         st.session_state.accuracy_log = []
-    if 'last_prediction_made' not in st.session_state: # Flag para controlar quando uma predição foi feita
+    if 'last_prediction_made' not in st.session_state:
         st.session_state.last_prediction_made = None
 
-    # Botões para entrada de resultados
+    # Entrada de novos resultados
     st.subheader("Registrar Novo Resultado:")
     col1, col2, col3 = st.columns(3)
     if col1.button("🔴 Casa (Vermelho)", use_container_width=True):
         st.session_state.history.append('V')
-        st.session_state.last_prediction_made = None # Resetar flag ao adicionar novo resultado
+        st.session_state.last_prediction_made = None
     if col2.button("🔵 Visitante (Azul)", use_container_width=True):
         st.session_state.history.append('C')
         st.session_state.last_prediction_made = None
@@ -299,9 +304,9 @@ def main():
     if col_undo.button("Apagar Último Resultado", type="secondary", use_container_width=True):
         if st.session_state.history:
             st.session_state.history.pop()
-        if st.session_state.predictions_log: # Tenta remover a última predição se houver
+        if st.session_state.predictions_log:
             st.session_state.predictions_log.pop()
-        if st.session_state.accuracy_log: # Tenta remover a última acurácia se houver
+        if st.session_state.accuracy_log:
             st.session_state.accuracy_log.pop()
         st.session_state.last_prediction_made = None
 
@@ -315,91 +320,75 @@ def main():
     hist_disp = ''.join(color_map.get(r, '⬜') for r in reversed(st.session_state.history))
     st.markdown(f"**{hist_disp}**")
 
-    # Executar análise
+    # Instanciar o analisador
     analyzer = CasinoAnalyzer(st.session_state.history)
     patterns = analyzer.analyze_patterns()
     risk = analyzer.risk_and_signal(patterns)
-    # A predição agora usa o método adaptativo
-    markov_pred = analyzer.markov_predict_adaptive()
+    markov_pred = analyzer.markov_predict_adaptive(user_confidence_threshold=user_threshold)
+
+    eventos_cv = [r for r in st.session_state.history if r in ['C', 'V']]
 
     # Conferência automática da última predição e resultado real
-    # Ajusta a lógica para garantir que estamos comparando a predição feita ANTES do resultado atual
-    eventos_cv = [r for r in st.session_state.history if r in ['C', 'V']]
-    
-    # Se há mais resultados C/V do que predições registradas,
-    # e se a última predição registrada corresponde ao penúltimo resultado C/V
-    # e o último resultado C/V é um novo resultado para ser conferido
     if len(eventos_cv) > 0 and len(st.session_state.predictions_log) > 0:
-        # A última predição no log é para o evento que *acabou* de acontecer
         last_recorded_pred = st.session_state.predictions_log[-1]
-        
-        # O resultado real a ser conferido é o último evento C/V do histórico
-        real_result_for_check = eventos_cv[-1] 
-        
-        # Para evitar dupla conferência e garantir que a predição foi para este resultado
-        # Verifica se o log de acurácia já tem essa conferência ou se o resultado atual é novo
+        real_result_for_check = eventos_cv[-1]
         if len(st.session_state.accuracy_log) < len(st.session_state.predictions_log):
-            # A predição foi feita para o resultado que acaba de ser inserido
-            # Só confere se a predição era válida e não crítica
             if last_recorded_pred.get('color') is not None and last_recorded_pred.get('risk_level') != 'crítico':
                 acertou = (last_recorded_pred['color'] == real_result_for_check)
                 st.session_state.accuracy_log.append(acertou)
 
-    # Registrar predição para o *próximo* resultado, se ainda não foi registrada para o estado atual
-    # Só registra se a predição for válida (cor diferente de None) E o risco não for "crítico"
-    # E se a predição ainda não foi registrada para o estado atual do histórico
-    if st.session_state.last_prediction_made is None: # Só tenta registrar se não registrou ainda
+    # Registrar predição para o próximo resultado, se ainda não foi registrada
+    if st.session_state.last_prediction_made is None:
         if markov_pred.get('color') is not None and risk != 'crítico':
             pred_to_add = markov_pred.copy()
-            pred_to_add['risk_level'] = risk # Anexa o nível de risco do momento da predição
+            pred_to_add['risk_level'] = risk
             st.session_state.predictions_log.append(pred_to_add)
-            st.session_state.last_prediction_made = pred_to_add # Marca que uma predição foi feita
+            st.session_state.last_prediction_made = pred_to_add
 
-    # Exibir avaliação de risco e padrões detectados
-    st.markdown("---")
-    st.markdown("## Avaliação de Risco 🚦")
-    st.markdown(f"- Nível de risco da janela {WINDOW_MIN}-{WINDOW_MAX}: **{risk.upper()}**")
-    with st.expander("Padrões detectados e níveis de risco (clique para expandir)"):
-        if patterns:
-            for p in patterns:
-                st.write(f"- [{p['risk'].upper()}] {p['desc']}")
-        else:
-            st.write("Nenhum padrão relevante detectado na janela atual.")
+    # Controle para só sugerir apostas a partir do 9º resultado
+    total_results = len(st.session_state.history)
 
-    # Predição e sugestão de aposta
-    st.markdown("---")
-    st.header("Predição do Próximo Resultado")
-    if risk == "crítico":
-        st.error(
-            "🚨 **ALERTA: Manipulação crítica detectada!**\n"
-            "O sistema recomenda **NÃO APOSTAR** no momento, para sua proteção.\n"
-            "Aguarde mais resultados para que a análise possa se reajustar."
-        )
+    if total_results < 9:
+        st.info(f"Análise iniciada. Por favor, insira pelo menos 9 resultados para receber sugestões de apostas. Resultados atuais: {total_results}")
     else:
-        color = markov_pred.get('color')
-        conf = markov_pred.get('conf', 0)
-        support = markov_pred.get('support', '')
-        emoji_map = {'V': '🔴', 'C': '🔵'}
-        emoji = emoji_map.get(color, None)
+        st.markdown("---")
+        st.markdown("## Avaliação de Risco 🚦")
+        st.markdown(f"- Nível de risco da janela {WINDOW_MIN}-{WINDOW_MAX}: **{risk.upper()}**")
 
-        if emoji and conf > 0: # Confiança maior que zero
-            st.subheader(f"Sinal para o Próximo Resultado:")
-            if conf >= analyzer.get_dynamic_confidence_threshold():
-                st.success(f"**SINAL FORTE:** Apostar {emoji}  (Confiança: {conf:.1f}%)")
-                st.write(f"Base analítica: {support}")
-                if st.button(f"Confirmar Aposta em {emoji}"):
-                    st.success(f"✅ Sua intenção de aposta em {emoji} foi registrada. Boa sorte!")
-                    # Aqui você poderia adicionar lógica de integração real ou logging
-            elif conf > 50: # Entre 50% e o limiar dinâmico
-                st.warning(f"**SINAL MODERADO:** Considerar {emoji} com cautela (Confiança: {conf:.1f}%)")
-                st.write(f"Base analítica: {support}")
-            else: # Abaixo de 50%, mas ainda com alguma indicação
-                st.info(f"**INDICAÇÃO LEVE:** {emoji} é a tendência mais provável (Confiança: {conf:.1f}%)")
-                st.write(f"Base analítica: {support}")
+        with st.expander("Padrões detectados e níveis de risco (clique para expandir)"):
+            if patterns:
+                for p in patterns:
+                    st.write(f"- [{p['risk'].upper()}] {p['desc']}")
+            else:
+                st.write("Nenhum padrão relevante detectado na janela atual.")
+
+        st.markdown("---")
+        st.header("Predição do Próximo Resultado")
+        if risk == "crítico":
+            st.error(
+                "🚨 **ALERTA: Manipulação crítica detectada!**\n"
+                "O sistema recomenda **NÃO APOSTAR** no momento, para sua proteção.\n"
+                "Aguarde mais resultados para que a análise possa se reajustar."
+            )
         else:
-            st.info("Ainda sem confiança suficiente para sugerir uma aposta no momento.")
-            st.write(f"Detalhes: {support}")
+            color = markov_pred.get('color')
+            conf = markov_pred.get('conf', 0)
+            support = markov_pred.get('support', '')
+            emoji_map = {'V': '🔴', 'C': '🔵'}
+            emoji = emoji_map.get(color, None)
 
+            if emoji and conf > 0:
+                st.subheader(f"Sinal para o Próximo Resultado:")
+                if conf >= user_threshold:
+                    st.success(f"**SINAL FORTE:** Apostar {emoji}  (Confiança: {conf:.1f}%)")
+                elif conf > 50:
+                    st.warning(f"**SINAL MODERADO:** Considerar {emoji} com cautela (Confiança: {conf:.1f}%)")
+                else:
+                    st.info(f"**INDICAÇÃO LEVE:** {emoji} é a tendência mais provável (Confiança: {conf:.1f}%)")
+                st.write(f"Base analítica: {support}")
+            else:
+                st.info("Ainda sem confiança suficiente para sugerir uma aposta no momento.")
+                st.write(f"Detalhes: {support}")
 
     # Painel de performance automática
     st.markdown("---")
@@ -408,22 +397,21 @@ def main():
         total = len(st.session_state.accuracy_log)
         acertos = sum(st.session_state.accuracy_log)
         taxa = (acertos / total) * 100
+        color_str = 'green' if taxa >= 60 else 'orange' if taxa >= 50 else 'red'
         st.markdown(f"- **Total de sinais avaliados:** {total}")
         st.markdown(f"- **Acertos:** {acertos}")
-        st.markdown(f"- **Taxa de acerto:** <span style='font-size:24px; color: {'green' if taxa >= 60 else 'orange' if taxa >= 50 else 'red'};'>**{taxa:.2f}%**</span>", unsafe_allow_html=True)
-        
+        st.markdown(
+            f"- **Taxa de acerto:** <span style='font-size:24px; color: {color_str};'>"
+            f"**{taxa:.2f}%**</span>",
+            unsafe_allow_html=True
+        )
+
         with st.expander("Últimas 20 Conferências (Acertos/Erros)"):
-            if st.session_state.accuracy_log:
-                ultimas = st.session_state.accuracy_log[-20:]
-                # Ajusta o índice de exibição para começar do número correto da predição
-                start_idx_display = len(st.session_state.accuracy_log) - len(ultimas) + 1 
-                for i, acerto in enumerate(ultimas, start=start_idx_display):
-                    st.write(f"#{i}: {'✅ Acertou' if acerto else '❌ Errou'}")
-            else:
-                st.write("Nenhuma conferência para exibir.")
+            last_20 = st.session_state.accuracy_log[-20:]
+            results_str = "".join("✅" if a else "❌" for a in last_20)
+            st.write(results_str)
     else:
-        st.write("Ainda sem dados suficientes para avaliar desempenho do sistema.")
-        st.info("Para começar a avaliar a performance, insira mais resultados.")
+        st.info("Nenhuma conferência de desempenho disponível.")
 
 if __name__ == "__main__":
     main()
